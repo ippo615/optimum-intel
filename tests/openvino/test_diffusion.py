@@ -580,6 +580,28 @@ class OVPipelineForText2ImageTest(unittest.TestCase):
         image = pipeline(**inputs).images[0]
         self.assertTupleEqual(image.size, (32, 32))
 
+    @require_diffusers
+    def test_component_to_device(self):
+        pipeline = self.OVMODEL_CLASS.from_pretrained(
+            MODEL_NAMES["stable-diffusion"], compile=False, device=OPENVINO_DEVICE
+        )
+        # moving one component leaves the others on the pipeline's device
+        pipeline.text_encoder.to("AUTO")
+        pipeline.vae.to("AUTO")
+        self.assertEqual(pipeline.text_encoder._device, "AUTO")
+        self.assertEqual(pipeline.vae.decoder._device, "AUTO")
+        self.assertEqual(pipeline.unet._device, OPENVINO_DEVICE)
+        self.assertIsNone(pipeline.text_encoder.request)
+
+        # moving the pipeline moves every component, as in diffusers
+        pipeline.to(OPENVINO_DEVICE)
+        for component in (pipeline.text_encoder, pipeline.unet, pipeline.vae.decoder, pipeline.vae.encoder):
+            self.assertEqual(component._device, OPENVINO_DEVICE)
+        inputs = self.generate_inputs(height=32, width=32)
+        inputs["output_type"] = "pil"
+        image = pipeline(**inputs).images[0]
+        self.assertTupleEqual(image.size, (32, 32))
+
 
 class OVPipelineForImage2ImageTest(unittest.TestCase):
     SUPPORTED_ARCHITECTURES = [

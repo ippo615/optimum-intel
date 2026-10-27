@@ -750,6 +750,9 @@ class OVDiffusionPipeline(OVBaseModel, DiffusionPipeline):
         if isinstance(device, str):
             self._device = device.upper()
             self.clear_requests()
+            # as in diffusers, moving the pipeline moves every component, including ones moved individually
+            for component in self.components.values():
+                component.to(self._device)
         elif device is not None:
             raise ValueError(
                 "The `device` argument should be a string representing the device on which the model should be loaded."
@@ -1218,6 +1221,7 @@ class OVPipelinePart(OVModelHostMixin, ConfigMixin, CacheMixin):
         self.parent_pipeline = parent_pipeline
         self.request = None if not parent_pipeline._compile_only else self.model
         self.ov_config = parent_pipeline.ov_config
+        self._device_override: Optional[str] = None
 
         if isinstance(parent_pipeline.model_save_dir, TemporaryDirectory):
             self.model_save_dir = Path(parent_pipeline.model_save_dir.name) / self.model_name
@@ -1235,6 +1239,10 @@ class OVPipelinePart(OVModelHostMixin, ConfigMixin, CacheMixin):
 
     @property
     def _device(self) -> str:
+        # Set by `to()` to place this component on its own device (e.g. the text encoder on CPU while the
+        # transformer runs on GPU); otherwise the component follows the pipeline's device.
+        if self._device_override is not None:
+            return self._device_override
         return self.parent_pipeline._device
 
     @property
@@ -1275,7 +1283,7 @@ class OVPipelinePart(OVModelHostMixin, ConfigMixin, CacheMixin):
                 dtype = arg
 
         if isinstance(device, str):
-            self._device = device.upper()
+            self._device_override = device.upper()
             self.request = None
         elif device is not None:
             raise ValueError(
